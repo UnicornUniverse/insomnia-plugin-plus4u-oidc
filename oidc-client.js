@@ -24,8 +24,8 @@ const DEFAULT_INFO_PAGE = "https://uuidentity.plus4u.net/uu-identitymanagement-m
 
 class OidcClient {
 
-  static async interactiveLogin() {
-    let [code, serverPort] = await OidcClient.getAuthorizationCode();
+  static async interactiveLogin(oidcServer) {
+    let [code, serverPort] = await OidcClient.getAuthorizationCode(oidcServer);
     let token = await OidcClient.grantAuthorizationCodeToken(code, serverPort);
     return token.id_token;
   }
@@ -35,8 +35,8 @@ class OidcClient {
     return true;
   }
 
-  static async getAuthorizationCode() {
-    let metadata = await OidcClient.getMetadata();
+  static async getAuthorizationCode(oidcServer) {
+    let metadata = await OidcClient.getMetadata(oidcServer);
     return await new Promise((resolve, reject) => {
       // Start local server to handle auth callback
       let server = http.createServer((req, res) => {
@@ -77,14 +77,17 @@ class OidcClient {
       refresh = providerUri;
       providerUri = null;
     }
+    console.log("getMetadata", {providerUri});
     if (providerUri === null) {
       // TODO Handle trailing slashes from configuration parameters
       providerUri = this.getOidcUri();
     }
 
     let discoveryUri = `${providerUri}/${OIDC_WELL_KNOWN_DISCOVERY_PATH}`;
+    console.log("discoveryUri", {discoveryUri});
     const response = await fetch(discoveryUri);
     const result = await response.json();
+    console.log("result", {result});
     return result;
   }
 

@@ -1,4 +1,4 @@
-This Insomnia plugin enables easy authentication againsts [https://oidc.plus4.net](https://oidc.plus4u.net/uu-oidcg01-main/0-0/) (it can be changed in plugin configuration).
+This Insomnia plugin enables easy authentication againsts [https://uuidentity.plus4u.net/](https://uuidentity.plus4u.net/) (it can be changed in plugin configuration).
 
 [Changelog](CHANGELOG.md) 
 

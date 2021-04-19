@@ -43,9 +43,17 @@ module.exports.templateTags = [
     name: "uuPersonPlus4uOidcToken",
     displayName: "Token from oidc.plus4u.net",
     description: "Get identity token from oidc.plus4u.net",
-
+    args: [
+      {
+        displayName: "OIDC Server",
+        type: "string",
+        defaultValue: "https://uuidentity.plus4u.net/uu-oidc-maing02/bb977a99f4cc4c37a2afce3fd599d0a7/oidc",
+        help: `URL of the OIDC server.`
+      }
+    ],
     async run(context, oidcServer) {
-      const cachedToken = oidcTokenCache.get(MY_TOKEN);
+      const tokenId = oidcServer+MY_TOKEN;
+      const cachedToken = oidcTokenCache.get(tokenId);
       if (cachedToken) {
         if(cachedToken.reuseLimit > new Date()){
           //refreshToken + this.cacheToken(token, identification);
@@ -57,8 +65,8 @@ module.exports.templateTags = [
       }
       isAlreadyRunning = true;
       try {
-        const token = await OidcToken.interactiveLogin();
-        cacheToken(token, MY_TOKEN);
+        const token = await OidcToken.interactiveLogin(oidcServer);
+        cacheToken(token, tokenId);
         return token;
       }catch (e) {
         console.error(e);
