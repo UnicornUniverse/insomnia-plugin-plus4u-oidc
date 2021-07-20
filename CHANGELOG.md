@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 
+## [0.2.7] - 2021-07-20
+- replaced library "url" for "url-parse"
+
 ## [0.2.6] - 2021-05-03
 
 ### Changed

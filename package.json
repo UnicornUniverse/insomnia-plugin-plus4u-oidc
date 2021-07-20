@@ -1,6 +1,6 @@
 {
   "name": "insomnia-plugin-plus4u-oidc",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Insomnia plugin that provides easy authentication against oidc.plus4u.net .",
   "main": "plugin.js",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "node-fetch": "^2.6.0",
     "oidc-plus4u-vault": "^0.4.2",
     "open": "^7.0.3",
-    "url": "^0.11.0"
+    "url-parse": "^1.5.1"
   },
   "keywords": [
     "insomnia",

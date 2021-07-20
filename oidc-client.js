@@ -1,7 +1,7 @@
 "use strict";
 
 const http = require("http");
-const url = require("url");
+const Url = require('url-parse');
 const open = require("open");
 const fetch = require("node-fetch");
 
@@ -40,7 +40,10 @@ class OidcClient {
     return await new Promise((resolve, reject) => {
       // Start local server to handle auth callback
       let server = http.createServer((req, res) => {
-        let query = url.parse(req.url, true).query;
+        //let query = url.parse(req.url, true).query;
+        console.log("url", req.url);
+        let query = new Url(req.url, null, true).query;
+        console.log("query", query);
         let code = query[OAUTH_CODE];
         let redirectUri = DEFAULT_INFO_PAGE;
         redirectUri += `?clientId=${DEFAULT_CLIENT_ID}`;
