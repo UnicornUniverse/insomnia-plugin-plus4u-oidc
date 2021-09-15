@@ -29,5 +29,15 @@ Another tag is **Token from oidc.plus4u.net for uuEE** (*uuEePlus4uOidcToken*) i
 - credentials can be stored in *oidc-plus4u-vault*
 - tokens are automatically reloaded when expired
 
+## *Proxy*
+- Plugin supports proxy configuration by defining proxy attribute in any of the environment configuration. Proxy is used automatically whenever it's defined.
+
+### *How to use*
+```json
+{
+  "proxy": "http://1.2.3.4:5678/"
+}
+```
+
 # Limitations
 - none

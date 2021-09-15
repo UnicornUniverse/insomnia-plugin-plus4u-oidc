@@ -3,6 +3,7 @@ const NodeCache = require("node-cache");
 const Jwt = require("jws");
 const secureStore = require("oidc-plus4u-vault/lib/securestore");
 const fetch = require("node-fetch");
+const HttpsProxyAgent = require('https-proxy-agent');
 
 let isAlreadyRunning = false;
 
@@ -87,12 +88,12 @@ module.exports.templateTags = [
       }
     ],
 
-    async login(accessCode1, accessCode2, oidcServer, scope) {
+    async login(accessCode1, accessCode2, oidcServer, scope, proxy) {
       if (accessCode1.length === 0 || accessCode2.length === 0) {
         throw `Access code cannot be empty. Ignore this error for "Prompt ad-hoc".`;
       }
 
-      let tokenEndpoint = await this.getTokenEndpoint(oidcServer);
+      let tokenEndpoint = await this.getTokenEndpoint(oidcServer, proxy);
 
       let credentials = {
         accessCode1,
@@ -101,15 +102,7 @@ module.exports.templateTags = [
         scope
       };
 
-      let headers = {};
-      headers["Content-Type"] = "application/json";
-      headers["Accept"] = "application/json";
-
-      const res = await fetch(tokenEndpoint, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(credentials),
-      })
+      const res = await fetch(tokenEndpoint, this.getLoginDtoIn(credentials, proxy));
       let resp = await res.json();
       if (Object.keys(resp.uuAppErrorMap).length > 0) {
         throw `Cannot login to OIDC server on ${oidcServer}. Probably invalid combination of Access Code 1 and Access Code 2.`;
@@ -117,14 +110,30 @@ module.exports.templateTags = [
       return resp.id_token;
     },
 
-    async getTokenEndpoint(oidcServer) {
+    getLoginDtoIn(credentials, proxy) {
+      let loginDtoIn = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(credentials)
+      };
+      return proxy ? {...loginDtoIn, agent: new HttpsProxyAgent(proxy)} : loginDtoIn
+    },
+
+    async getTokenEndpoint(oidcServer, proxy) {
       let oidcServerConfigUrl = oidcServer + "/.well-known/openid-configuration";
-      const response = await fetch(oidcServerConfigUrl);
+      const response = await fetch(oidcServerConfigUrl, this.getOpenIdConfigurationDtoIn(oidcServer, proxy));
       const oidcConfig = await response.json();
       if (Object.keys(oidcConfig.uuAppErrorMap).length > 0) {
         throw `Cannot get configuration of OIDC server on ${oidcServer}. Probably invalid URL.`;
       }
       return oidcConfig.token_endpoint;
+    },
+
+    getOpenIdConfigurationDtoIn(oidcServer, proxy) {
+      return proxy ? {agent: new HttpsProxyAgent(proxy)} : {};
     },
 
     async loginDirectly(context, identification, oidcServer, oidcScope, cacheKey) {
@@ -162,7 +171,7 @@ module.exports.templateTags = [
         }
       }
 
-      let token = await this.login(ac1, ac2, oidcServer, oidcScope);
+      let token = await this.login(ac1, ac2, oidcServer, oidcScope, context.context.proxy);
       this.accessCodesStore.set(cacheKey, {accessCode1: ac1, accessCode2: ac2});
 
       return token;
@@ -171,7 +180,7 @@ module.exports.templateTags = [
     async run(context, identification, oidcServer, tokenScope) {
       const oidcScope = tokenScope ? tokenScope : "openid https:// http://localhost";
       // Cache key must include multiple attributes to correctly handle switching of environments and workspaces 
-      const cacheKey = identification + "#" + oidcServer + "#" + oidcScope + "#" + context.meta.workspaceId; 
+      const cacheKey = identification + "#" + oidcServer + "#" + oidcScope + "#" + context.meta.workspaceId;
       let token = oidcTokenCache.get(cacheKey)?.token;
       if (!token) {
         token = await this.loginDirectly(context, identification, oidcServer, oidcScope, cacheKey);
