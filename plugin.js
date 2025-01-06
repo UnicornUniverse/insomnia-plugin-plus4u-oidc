@@ -3,6 +3,7 @@ const NodeCache = require("node-cache");
 const Jwt = require("jws");
 const secureStore = require("oidc-plus4u-vault/lib/securestore");
 const fetch = require("node-fetch");
+const https = require('https');
 
 let isAlreadyRunning = false;
 
@@ -15,7 +16,7 @@ function cacheToken(token, identification) {
   if (decodedToken && decodedToken.payload) {
     let now = new Date();
     let exp = new Date(decodedToken.payload.exp * 1000); //token exp is in seconds
-    let cacheTtl = exp.getTime() - now.getTime() - 15 * 60 * 1000;
+    let cacheTtl = exp.getTime() - now.getTime() - 5 * 60 * 1000;
     oidcTokenCache.set(identification, getTokenObject(token, exp), cacheTtl / 1000);
   } else {
     console.log("decoding failed, storing token without additional info");
@@ -29,6 +30,12 @@ function getTokenObject(token, exp){
     token: token,
     reuseLimit: new Date(limit)
   }
+}
+
+function getHttpsAgent(validate) {
+  return new https.Agent({
+    rejectUnauthorized: validate,
+  });
 }
 
 module.exports.templateTags = [
@@ -84,15 +91,23 @@ module.exports.templateTags = [
         type: "string",
         defaultValue: "openid https:// http://localhost",
         help: `URL of the OIDC server.`
+      },
+      {
+        displayName: "Validate certificates",
+        type: "boolean",
+        defaultValue: true,
+        help: `If checked, validate SSL certificates for API requests.`
       }
     ],
 
-    async login(accessCode1, accessCode2, oidcServer, scope) {
+    async login(accessCode1, accessCode2, oidcServer, scope, validate) {
       if (accessCode1.length === 0 || accessCode2.length === 0) {
         throw `Access code cannot be empty. Ignore this error for "Prompt ad-hoc".`;
       }
 
-      let tokenEndpoint = await this.getTokenEndpoint(oidcServer);
+      const agent = getHttpsAgent(validate);
+
+      let tokenEndpoint = await this.getTokenEndpoint(oidcServer, agent);
 
       let credentials = {
         accessCode1,
@@ -109,6 +124,7 @@ module.exports.templateTags = [
         method: "POST",
         headers: headers,
         body: JSON.stringify(credentials),
+        agent: agent
       })
       let resp = await res.json();
       if (Object.keys(resp.uuAppErrorMap).length > 0) {
@@ -117,9 +133,11 @@ module.exports.templateTags = [
       return resp.id_token;
     },
 
-    async getTokenEndpoint(oidcServer) {
+    async getTokenEndpoint(oidcServer, agent) {
       let oidcServerConfigUrl = oidcServer + "/.well-known/openid-configuration";
-      const response = await fetch(oidcServerConfigUrl);
+      const response = await fetch(oidcServerConfigUrl, {
+        agent: agent
+      });
       const oidcConfig = await response.json();
       if (Object.keys(oidcConfig.uuAppErrorMap).length > 0) {
         throw `Cannot get configuration of OIDC server on ${oidcServer}. Probably invalid URL.`;
@@ -127,7 +145,7 @@ module.exports.templateTags = [
       return oidcConfig.token_endpoint;
     },
 
-    async loginDirectly(context, identification, oidcServer, oidcScope, cacheKey) {
+    async loginDirectly(context, identification, oidcServer, oidcScope, validate, cacheKey) {
       let ac1;
       let ac2;
       if (this.accessCodesStore.get(cacheKey)) {
@@ -162,22 +180,23 @@ module.exports.templateTags = [
         }
       }
 
-      let token = await this.login(ac1, ac2, oidcServer, oidcScope);
+      let token = await this.login(ac1, ac2, oidcServer, oidcScope, validate);
       this.accessCodesStore.set(cacheKey, {accessCode1: ac1, accessCode2: ac2});
 
       return token;
     },
 
-    async run(context, identification, oidcServer, tokenScope) {
+    async run(context, identification, oidcServer, tokenScope, validate = true) {
       const oidcScope = tokenScope ? tokenScope : "openid https:// http://localhost";
-      // Cache key must include multiple attributes to correctly handle switching of environments and workspaces 
-      const cacheKey = identification + "#" + oidcServer + "#" + oidcScope + "#" + context.meta.workspaceId; 
+      // Cache key must include multiple attributes to correctly handle switching of environments and workspaces
+      const cacheKey = identification + "#" + oidcServer + "#" + oidcScope + "#" + context.meta.workspaceId;
       let token = oidcTokenCache.get(cacheKey)?.token;
       if (!token) {
-        token = await this.loginDirectly(context, identification, oidcServer, oidcScope, cacheKey);
+        token = await this.loginDirectly(context, identification, oidcServer, oidcScope, validate, cacheKey);
         cacheToken(token, cacheKey);
       }
       return token;
     }
+
   }
 ];
