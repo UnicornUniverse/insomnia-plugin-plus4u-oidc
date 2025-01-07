@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 
+## [0.3.0] - 2025-01-07
+- possibility to disable certficate chain validity
+
 ## [0.2.7] - 2021-07-20
 - replaced library "url" for "url-parse"
 
