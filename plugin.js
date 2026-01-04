@@ -4,15 +4,18 @@ const Jwt = require("jws");
 const secureStore = require("oidc-plus4u-vault/lib/securestore");
 const fetch = require("node-fetch");
 const https = require('https');
+const crypto = require('crypto');
 
 const alreadyRunningForTokenMap = {};
 
-let WRONG_TOKEN_CACHE_TTL_SECS = 2 * 60; //2 minutes
 let TOKEN_GRACE_PERIOD_SECS = 5 * 60; //5 minutes
 
 let oidcTokenCache= new NodeCache({ stdTTL: 60 * 60, checkperiod: 120 });
 
-function cacheToken(token, identification, cacheIncorrectToken) {
+// Cache TTL for error results (prevents endless login retries on persistent config errors)
+let ERROR_CACHE_TTL_SECS = 5*60; // 5 minutes
+
+function cacheToken(token, identification) {
   let now = new Date();
   const decodedToken = Jwt.decode(token);
   if (decodedToken && decodedToken.payload) {
@@ -24,11 +27,26 @@ function cacheToken(token, identification, cacheIncorrectToken) {
     } else {
       console.debug(`Token ${identification} is too close to expiration, skipping cache.`);
     }
-  } else if (cacheIncorrectToken) {
-    console.log("decoding failed, storing token without additional info");
-    let exp = new Date(now.getTime() + WRONG_TOKEN_CACHE_TTL_SECS * 1000);
-    oidcTokenCache.set(identification, getTokenObject(token, exp), WRONG_TOKEN_CACHE_TTL_SECS);
+  } else  {
+    console.log("decoding failed, token is not cached");
   }
+}
+
+function cacheErrorResult(identification, err) {
+  const cachedAt = new Date();
+  const message = safeErrorToString(err);
+  oidcTokenCache.set(
+    identification,
+    {
+      error: true,
+      cachedAt,
+      message,
+      // keep shape similar enough so callers can inspect
+      token: null,
+      reuseLimit: cachedAt,
+    },
+    ERROR_CACHE_TTL_SECS
+  );
 }
 
 function getTokenObject(token, exp){
@@ -45,43 +63,106 @@ function getHttpsAgent(validate) {
   });
 }
 
-async function interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate, cacheInvalidToken) {
+function safeErrorToString(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  // Prefer the human-readable message
+  let msg = err.message || String(err);
+  // If it's an HTTP error message we built (includes status/body), keep it.
+  // Redact obvious secrets if they accidentally appear.
+  msg = msg.replace(/client_secret=([^&\s]+)/gi, "client_secret=***");
+  msg = msg.replace(/"client_secret"\s*:\s*"[^"]+"/gi, '"client_secret":"***"');
+  // Keep it short for UI fields
+  if (msg.length > 500) msg = msg.slice(0, 500) + "...";
+  return msg;
+}
+
+function shortHash(value) {
+  if (!value) return "";
+  return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12);
+}
+
+function makeTokenId(cacheTag, oidcServer, infoPage, clientId, clientSecret, validate) {
+  // Never put the raw clientSecret into the cache key (or logs). Use a short hash.
+  const secretHash = clientSecret ? shortHash(clientSecret) : "";
+  return `TOKEN:${cacheTag || "default"}-${oidcServer || "default"}-${infoPage || "default"}-${clientId || "default"}-${secretHash}-${validate}`;
+}
+
+// Unified formatting of user-visible outputs (Insomnia template tag result)
+// Keep these short and consistent so they stand out in headers/bodies.
+function formatTagMessage(kind, message) {
+  const cleanKind = (kind || "status").toString().trim();
+  const cleanMessage = (message || "").toString().trim();
+  if (!cleanMessage) return `-- ${cleanKind} --`;
+  return `-- ${cleanKind}: ${cleanMessage} --`;
+}
+
+function formatTokenDisabled() {
+  return formatTagMessage("token disabled", "");
+}
+
+function formatTokenInProgress() {
+  return formatTagMessage("token retrieval already in progress", "");
+}
+
+function formatCachedAt(date) {
+  // We store Date objects in cache; still handle strings/numbers defensively.
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return String(date);
+  return d.toISOString();
+}
+
+function formatTokenCachedError(message, cachedAt) {
+  const when = cachedAt ? formatCachedAt(cachedAt) : "unknown time";
+  return formatTagMessage(`token error (cached ${when}, toggle the Disabled switch to refresh)`, `${message}`);
+}
+
+function formatTokenError(err) {
+  return formatTagMessage("token error", safeErrorToString(err));
+}
+
+async function interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate) {
   console.debug(`Getting OIDC token from ${oidcServer}, infoPage: ${infoPage}, clientId: ${clientId}, validate certs: ${validate}`);
-  const tokenId = `TOKEN:${cacheTag}-${oidcServer}-${infoPage}-${clientId}-${clientSecret}-${validate}`;
-  if (disabled) {
-    console.debug(`Login is disabled for cacheTag ${cacheTag} and oidcServer ${oidcServer}, removing any cached token ${tokenId} and returning empty string.`);
-    oidcTokenCache.del(tokenId);
-    return "";
-  }
-  console.debug(`Login is active for cacheTag ${cacheTag} and oidcServer ${oidcServer}, cached token to be used ${tokenId}`);
-  const cachedToken = oidcTokenCache.get(tokenId);
-  if (cachedToken) {
-    if (cachedToken.reuseLimit > new Date()) {
-      // refreshToken + this.cacheToken(token, identification, cacheInvalidToken);
-    }
-    console.debug(`Using cached OIDC token for id ${tokenId}`, cachedToken);
-    return cachedToken.token;
-  }
+  const tokenId = makeTokenId(cacheTag, oidcServer, infoPage, clientId, clientSecret, validate);
+   if (disabled) {
+     console.debug(`Login is disabled for cacheTag ${cacheTag} and oidcServer ${oidcServer}, removing any cached token ${tokenId} and returning empty string.`);
+     oidcTokenCache.del(tokenId);
+     return formatTokenDisabled();
+   }
+   console.debug(`Login is active for cacheTag ${cacheTag} and oidcServer ${oidcServer}, cached token to be used ${tokenId}`);
+   const cachedToken = oidcTokenCache.get(tokenId);
+   if (cachedToken) {
+     if (cachedToken.error) {
+       return formatTokenCachedError(cachedToken.message || "Unknown error", cachedToken.cachedAt);
+     }
+     if (cachedToken.reuseLimit > new Date()) {
+       // refreshToken + this.cacheToken(token, identification);
+     }
+     console.debug(`Using cached OIDC token for id ${tokenId}`, cachedToken);
+     return cachedToken.token;
+   }
 
-  if (alreadyRunningForTokenMap[tokenId]) {
-    console.debug(`The interactive login for token ${tokenId} is already running, skipping the processing`);
-    return "";
-  }
+   if (alreadyRunningForTokenMap[tokenId]) {
+     console.debug(`The interactive login for token ${tokenId} is already running, skipping the processing`);
+     return formatTokenInProgress();
+   }
 
-  alreadyRunningForTokenMap[tokenId] = true;
-  try {
-    const agent = getHttpsAgent(validate);
+   alreadyRunningForTokenMap[tokenId] = true;
+   try {
+     const agent = getHttpsAgent(validate);
 
-    const token = await OidcToken.interactiveLogin(oidcServer, infoPage, clientId, clientSecret, agent);
-    console.debug(`Obtained OIDC token for tokenId ${tokenId}`, token);
-    cacheToken(token, tokenId, cacheInvalidToken);
-    return token;
-  } catch (e) {
-    console.error("Interactive OIDC login failed.", e);
-    return "";
-  } finally {
-    alreadyRunningForTokenMap[tokenId] = false;
-  }
+     const token = await OidcToken.interactiveLogin(oidcServer, infoPage, clientId, clientSecret, agent);
+     console.debug(`Obtained OIDC token for tokenId ${tokenId}`, token);
+     cacheToken(token, tokenId);
+     return token;
+   } catch (e) {
+      console.error("Interactive OIDC login failed:", safeErrorToString(e));
+      // Return something visible in Insomnia instead of empty string.
+      cacheErrorResult(tokenId, e);
+      return formatTokenError(e);
+   } finally {
+     alreadyRunningForTokenMap[tokenId] = false;
+   }
 }
 
 module.exports.templateTags = [
@@ -154,7 +235,7 @@ module.exports.templateTags = [
     async run(context, disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate = false) {
       console.debug("Running with context", context);
       console.debug("Running with context purpose", context.context.getPurpose());
-      return await interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate, true);
+      return await interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate);
     }
   },
   {
