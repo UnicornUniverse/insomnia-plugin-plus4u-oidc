@@ -21,7 +21,20 @@ Another tag is **Token from oidc.plus4u.net for uuEE** (*uuEePlus4uOidcToken*) i
 ## *uuPersonPlus4uOidcToken*
 - easy Insomnia authentication against <https://oidc.plus4.net> (can be changed in tag configuration)
 - no configuration needed - token is loaded by opening window in default browser
-- cache (all valid tokens are cached, the TTL is 15 minutes before token expiration)
+- cache (all valid tokens are cached, the TTL is 5 minutes before token expiration)
+
+## *uuPersonCustomOidcToken*
+- interactive (browser-based) login for a **custom uuOIDC server**
+- configure:
+  - **OIDC Server** (e.g. `https://<gateway>/uu-oidc-maing02/<awid>/oidc`)
+  - **OIDC Info Page** (uuIdentityManagement route used after auth code is received)
+  - **Client ID**
+  - **Validate certificates** (turn off only for dev/self-signed certs)
+- **client secret handling**: the client secret is entered via a **password prompt** on first use and then kept **only in memory** for the current Insomnia session (it is not stored in the workspace/template tag config).
+- caching:
+  - cache (all valid tokens are cached, the TTL is 5 minutes before token expiration)
+  - if token retrieval fails, the error result is cached for 5 minutes; subsequent uses will show it as a **cached error** including the time when it was cached
+  - toggle the **Disabled** switch off/on to clear cached results and force re-login (and to re-prompt for the secret)
 
 ## *uuEePlus4uOidcToken*
 - easy Insomnia authentication against <https://oidc.plus4.net> (can be changed in tag configuration)

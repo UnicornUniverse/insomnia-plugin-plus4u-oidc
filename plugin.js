@@ -8,6 +8,9 @@ const crypto = require('crypto');
 
 const alreadyRunningForTokenMap = {};
 
+// In-memory (session-only) cache for prompted secrets. Not persisted to workspace.
+const promptedSecretCache = new Map();
+
 let TOKEN_GRACE_PERIOD_SECS = 5 * 60; //5 minutes
 
 let oidcTokenCache= new NodeCache({ stdTTL: 60 * 60, checkperiod: 120 });
@@ -165,6 +168,37 @@ async function interactiveLogin(disabled, cacheTag, oidcServer, infoPage, client
    }
 }
 
+async function interactiveLoginWithPrompt(
+  context,
+  disabled,
+  cacheTag,
+  oidcServer,
+  infoPage,
+  clientId,
+  validate,
+) {
+  let usedSecret = null;
+
+  const key = `${cacheTag || "default"}#${oidcServer || "default"}#${clientId || "default"}`;
+  if (promptedSecretCache.has(key)) {
+    usedSecret = promptedSecretCache.get(key);
+  } else if (!disabled) {
+    // Only prompt when active.
+    usedSecret = await context.app.prompt('OIDC client secret', {
+      label: `Client Secret for ${oidcServer} - ${clientId} (${cacheTag})`,
+    });
+    if (usedSecret) {
+      promptedSecretCache.set(key, usedSecret);
+    }
+  }
+
+  if (!usedSecret) {
+    return formatTagMessage("Undefined client_secret", "No Client Secret defined, please use the template for the first time to provide it via a prompt.");
+  }
+
+  return await interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, usedSecret, validate);
+}
+
 module.exports.templateTags = [
   {
     name: "uuPersonPlus4uOidcToken",
@@ -220,22 +254,24 @@ module.exports.templateTags = [
         help: `client_id of the OIDC client.`
       },
       {
-        displayName: "Client Secret",
-        type: "string",
-        defaultValue: "",
-        help: `client_secret of the OIDC client.`
-      },
-      {
         displayName: "Validate certificates",
         type: "boolean",
         defaultValue: true,
         help: `If checked, validate SSL certificates for API requests.`
       }
     ],
-    async run(context, disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate = false) {
+    async run(context, disabled, cacheTag, oidcServer, infoPage, clientId, validate = false) {
       console.debug("Running with context", context);
       console.debug("Running with context purpose", context.context.getPurpose());
-      return await interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate);
+      return await interactiveLoginWithPrompt(
+        context,
+        disabled,
+        cacheTag,
+        oidcServer,
+        infoPage,
+        clientId,
+        validate,
+      );
     }
   },
   {
