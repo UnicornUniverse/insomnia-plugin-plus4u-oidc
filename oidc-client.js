@@ -24,9 +24,17 @@ const DEFAULT_INFO_PAGE = "https://uuidentity.plus4u.net/uu-identitymanagement-m
 
 class OidcClient {
 
-  static async interactiveLogin(oidcServer) {
-    let [code, serverPort] = await OidcClient.getAuthorizationCode(oidcServer);
-    let token = await OidcClient.grantAuthorizationCodeToken(code, serverPort);
+  static async interactiveLogin(oidcServer, infoPage, clientId, clientSecret, agent) {
+    console.debug(`interactiveLogin called with params:`, {oidcServer, infoPage, clientId});
+    const usedOidcServer = oidcServer || OidcClient.getOidcUri();
+    let [code, serverPort] = await OidcClient.getAuthorizationCode(usedOidcServer, infoPage, clientId, agent);
+    let token = await OidcClient.grantAuthorizationCodeToken(code, serverPort, clientId, clientSecret, agent, usedOidcServer);
+
+    if (!token.id_token) {
+      console.error("Unexpected response from OIDC server, no id_token present:", token);
+      return "error";
+      //throw new Error("Authentication failed, no id_token returned from OIDC server.");
+    }
     return token.id_token;
   }
 
@@ -35,23 +43,27 @@ class OidcClient {
     return true;
   }
 
-  static async getAuthorizationCode(oidcServer) {
-    let metadata = await OidcClient.getMetadata(oidcServer);
+  static async getAuthorizationCode(oidcServer, infoPage, clientId, agent) {
+    console.debug(`getAuthorizationCode called with params:`, {oidcServer, infoPage, clientId});
+    let metadata = await OidcClient.getMetadata(oidcServer, false, agent);
+    const usedClientId = clientId || DEFAULT_CLIENT_ID;
+    const usedInfoPage = infoPage || DEFAULT_INFO_PAGE;
     return await new Promise((resolve, reject) => {
       // Start local server to handle auth callback
       let server = http.createServer((req, res) => {
         //let query = url.parse(req.url, true).query;
-        console.log("url", req.url);
+        console.debug("Local server received request with url", req.url);
         let query = new Url(req.url, null, true).query;
-        console.log("query", query);
         let code = query[OAUTH_CODE];
-        let redirectUri = DEFAULT_INFO_PAGE;
-        redirectUri += `?clientId=${DEFAULT_CLIENT_ID}`;
+        let redirectUri = usedInfoPage;
+        redirectUri += `?clientId=${usedClientId}`;
         if (code) {
+          console.debug(`Received authorization code from OIDC server, redirecting to ${redirectUri}.`);
           resolve([code, server.address().port]);
           res.writeHead(302, {"Location": redirectUri});
         } else {
           let uuAppErrorMap = query["uuAppErrorMap"];
+          console.error(`No access token code returned from OIDC server:`, uuAppErrorMap);
           reject(new Error(`No access token code returned from OIDC server: ${uuAppErrorMap}`));
           redirectUri += `&uuAppErrorMap=${uuAppErrorMap}`;
           res.writeHead(302, {"Location": redirectUri});
@@ -64,80 +76,85 @@ class OidcClient {
       server.listen(0);
       // Open browser to initialize auth process
       let authzUri = metadata["authorization_endpoint"];
-      authzUri += `?${OAUTH_CLIENT_ID}=${DEFAULT_CLIENT_ID}`;
+      authzUri += `?${OAUTH_CLIENT_ID}=${usedClientId}`;
       authzUri += `&${OAUTH_REDIRECT_URI}=http://localhost:${server.address().port}`;
       authzUri += `&${OAUTH_RESPONSE_TYPE}=${OAUTH_CODE}`;
       authzUri += `&${OAUTH_SCOPE}=${OAUTH_SCOPE_OPENID}${encodeURIComponent(" " + DEFAULT_AUDIENCE)}`;
+
+      console.debug("Opening browser with authzUri:", authzUri);
       open(authzUri);
     });
   }
 
-  static async getMetadata(providerUri = null, refresh = false) {
-    if (typeof(providerUri) === "boolean") {
-      refresh = providerUri;
-      providerUri = null;
-    }
-    console.log("getMetadata", {providerUri});
+  static async getMetadata(providerUri = null, refresh = false, agent) {
+    console.debug("getMetadata called with params:", {providerUri});
     if (providerUri === null) {
       // TODO Handle trailing slashes from configuration parameters
       providerUri = this.getOidcUri();
     }
 
     let discoveryUri = `${providerUri}/${OIDC_WELL_KNOWN_DISCOVERY_PATH}`;
-    console.log("discoveryUri", {discoveryUri});
-    const response = await fetch(discoveryUri);
+    console.debug("discoveryUri for getMetadata", discoveryUri);
+    const response = await fetch(discoveryUri, {agent: agent});
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`OIDC discovery failed (${response.status} ${response.statusText}) at ${discoveryUri}${body ? `: ${body}` : ""}`);
+    }
     const result = await response.json();
-    console.log("result", {result});
+    console.debug("discoveryUri call returned result", result);
     return result;
   }
 
-  static async getPublicKeyData(kid, issuerUri = null) {
-    let metadata = await OidcClient.getMetadata(issuerUri);
-    if (!issuerUri) {
-      issuerUri = metadata["issuer"];
-    }
-    const response = await fetch(metadata["jwks_uri"]);
-    const result = await response.json();
-    let jwks = JSON.parse(result.body);
-    let publicKeyData = jwks.keys.find(pk => pk.kid === kid);
+  static async grantAuthorizationCodeToken(authorizationCode, serverPort, clientId, clientSecret, agent, oidcServer) {
+    console.debug(`grantAuthorizationCodeToken called with params:`, {authorizationCode, serverPort, clientId, oidcServer});
+    const usedClientId = clientId || DEFAULT_CLIENT_ID;
+    const usedClientSecret = clientSecret || DEFAULT_CLIENT_SECRET;
 
-    if (!publicKeyData) {
-      throw new Error(`Unable to obtain public JWK key with jwk_id=${kid} from ${metadata["jwks_uri"]}.`);
-    }
-    return publicKeyData;
-  }
-
-  static async grantAuthorizationCodeToken(authorizationCode, serverPort) {
     let params = {};
     params[OAUTH_GRANT_TYPE] = OAUTH_GRANT_TYPE_CODE;
     params[OAUTH_CODE] = authorizationCode;
-    params[OAUTH_CLIENT_ID] = DEFAULT_CLIENT_ID;
-    params[OAUTH_CLIENT_SECRET] = DEFAULT_CLIENT_SECRET;
+    params[OAUTH_CLIENT_ID] = usedClientId;
+    params[OAUTH_CLIENT_SECRET] = usedClientSecret;
     params[OAUTH_SCOPE] = `${OAUTH_SCOPE_OPENID} ${DEFAULT_AUDIENCE}`;
     params[OAUTH_REDIRECT_URI] = `http://localhost:${serverPort}`;
-    return await OidcClient.grantToken(params);
+    return await OidcClient.grantToken(params, agent, oidcServer);
   }
 
-  static async grantToken(params) {
-    let metadata = await OidcClient.getMetadata();
+  static async grantToken(params, agent, oidcServer) {
+    let metadata = await OidcClient.getMetadata(oidcServer, false, agent);
     let grantTokenUri = metadata["token_endpoint"];
 
+    // OAuth2/OIDC token endpoint is typically x-www-form-urlencoded.
     let headers = {};
-    headers["Content-Type"] = "application/json";
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
     headers["Accept"] = "application/json";
 
-    let result;
+    const body = new URLSearchParams();
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) body.append(k, String(v));
+    });
+
     try {
+      console.debug(`grantToken - calling  grantTokenUri ${grantTokenUri} with params:`, params);
       const res = await fetch(grantTokenUri, {
+        agent: agent,
         method: "POST",
         headers: headers,
-        body: JSON.stringify(params),
-      })
-      result = res.json();
+        body: body.toString(),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      const payload = contentType.includes("application/json") ? await res.json() : await res.text();
+
+      if (!res.ok) {
+        throw new Error(`Token request failed (${res.status} ${res.statusText}) at ${grantTokenUri}: ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+      }
+
+      return payload;
     } catch (e) {
-      throw new Error(`Authentication failed: ${e.response.body}`);
+      console.error(`grantToken - authentication failed:`, e);
+      throw e;
     }
-    return result;
   }
 
   static getOidcUri() {
