@@ -2,6 +2,9 @@ This Insomnia plugin enables easy authentication againsts [https://oidc.plus4.ne
 
 [Changelog](CHANGELOG.md) 
 
+# Warning
+This is just a fork of https://github.com/UnicornUniverse/insomnia-plugin-plus4u-oidc where the only change is added support for Azure. 
+
 # Installation
 
 You can either install the plugin from <https://www.npmjs.com/package/insomnia-plugin-plus4u-oidc> or you can clone the git repository to Insomnia plugin folder. You can find more information at <https://support.insomnia.rest/article/26-plugins>.

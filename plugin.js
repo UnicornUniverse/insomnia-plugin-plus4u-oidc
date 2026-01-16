@@ -108,29 +108,52 @@ module.exports.templateTags = [
       const agent = getHttpsAgent(validate);
 
       let tokenEndpoint = await this.getTokenEndpoint(oidcServer, agent);
+      if(tokenEndpoint.startsWith("https://login.microsoftonline.com/") ) {
+        let credentials = {
+          username: accessCode1,
+          password: accessCode2,
+          grant_type: "password",
+          scope,
+          client_id: scope.replace(/^api:\/\//, "").replace(/\/.*/, "")
+        };
+        let headers = {};
+        headers["Content-Type"] = "application/x-www-form-urlencoded";
+        headers["Accept"] = "application/json";
 
-      let credentials = {
-        accessCode1,
-        accessCode2,
-        grant_type: "password",
-        scope
-      };
+        const res = await fetch(tokenEndpoint, {
+          method: "POST",
+          headers: headers,
+          body: new URLSearchParams(credentials),
+          agent: agent
+        })
+        let resp = await res.json();
+        if(resp.hasOwnProperty("error") ) {
+          throw `Cannot login to OIDC server on ${oidcServer}. Probably invalid combination of Access Code 1 and Access Code 2.`;
+        }
+        return resp.id_token;
+      } else {
+        let credentials = {
+          accessCode1,
+          accessCode2,
+          grant_type: "password",
+          scope
+        };
+        let headers = {};
+        headers["Content-Type"] = "application/json";
+        headers["Accept"] = "application/json";
 
-      let headers = {};
-      headers["Content-Type"] = "application/json";
-      headers["Accept"] = "application/json";
-
-      const res = await fetch(tokenEndpoint, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(credentials),
-        agent: agent
-      })
-      let resp = await res.json();
-      if (Object.keys(resp.uuAppErrorMap).length > 0) {
-        throw `Cannot login to OIDC server on ${oidcServer}. Probably invalid combination of Access Code 1 and Access Code 2.`;
+        const res = await fetch(tokenEndpoint, {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify(credentials),
+          agent: agent
+        })
+        let resp = await res.json();
+        if (Object.keys(resp.uuAppErrorMap).length > 0) {
+          throw `Cannot login to OIDC server on ${oidcServer}. Probably invalid combination of Access Code 1 and Access Code 2.`;
+        }
+        return resp.id_token;
       }
-      return resp.id_token;
     },
 
     async getTokenEndpoint(oidcServer, agent) {
@@ -139,7 +162,7 @@ module.exports.templateTags = [
         agent: agent
       });
       const oidcConfig = await response.json();
-      if (Object.keys(oidcConfig.uuAppErrorMap).length > 0) {
+      if (oidcServer.startsWith("https://login.microsoftonline.com/")? response.hasOwnProperty("error"): Object.keys(oidcConfig.uuAppErrorMap).length > 0) {
         throw `Cannot get configuration of OIDC server on ${oidcServer}. Probably invalid URL.`;
       }
       return oidcConfig.token_endpoint;
