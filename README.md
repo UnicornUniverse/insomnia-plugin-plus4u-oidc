@@ -31,6 +31,7 @@ Use this tag for standard user authentication against the default Plus4U product
 **Configuration:**
 | Option | Description |
 | :--- | :--- |
+| **Mode** | Select between **Production** and **Development**. **Production** uses the standard `uuidentity.plus4u.net` environment. **Development** uses `uuidentity-dev.plus4u.net`. |
 | **Disabled** | If checked, the tag returns a disabled message. Toggle this off/on to force a refresh. |
 
 ---
