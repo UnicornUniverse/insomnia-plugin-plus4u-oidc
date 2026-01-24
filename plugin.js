@@ -13,10 +13,10 @@ const promptedSecretCache = new Map();
 
 let TOKEN_GRACE_PERIOD_SECS = 5 * 60; //5 minutes
 
-let oidcTokenCache= new NodeCache({ stdTTL: 60 * 60, checkperiod: 120 });
+let oidcTokenCache = new NodeCache({ stdTTL: 60 * 60, checkperiod: 120 });
 
 // Cache TTL for error results (prevents endless login retries on persistent config errors)
-let ERROR_CACHE_TTL_SECS = 5*60; // 5 minutes
+let ERROR_CACHE_TTL_SECS = 5 * 60; // 5 minutes
 
 function cacheToken(token, identification) {
   let now = new Date();
@@ -30,7 +30,7 @@ function cacheToken(token, identification) {
     } else {
       console.debug(`Token ${identification} is too close to expiration, skipping cache.`);
     }
-  } else  {
+  } else {
     console.log("decoding failed, token is not cached");
   }
 }
@@ -52,8 +52,8 @@ function cacheErrorResult(identification, err) {
   );
 }
 
-function getTokenObject(token, exp){
-  let limit = exp.getTime() - 60*60*1000;
+function getTokenObject(token, exp) {
+  let limit = exp.getTime() - 60 * 60 * 1000;
   return {
     token: token,
     reuseLimit: new Date(limit)
@@ -127,45 +127,45 @@ function formatTokenError(err) {
 async function interactiveLogin(disabled, cacheTag, oidcServer, infoPage, clientId, clientSecret, validate) {
   console.debug(`Getting OIDC token from ${oidcServer}, infoPage: ${infoPage}, clientId: ${clientId}, validate certs: ${validate}`);
   const tokenId = makeTokenId(cacheTag, oidcServer, infoPage, clientId, clientSecret, validate);
-   if (disabled) {
-     console.debug(`Login is disabled for cacheTag ${cacheTag} and oidcServer ${oidcServer}, removing any cached token ${tokenId} and returning empty string.`);
-     oidcTokenCache.del(tokenId);
-     return formatTokenDisabled();
-   }
-   console.debug(`Login is active for cacheTag ${cacheTag} and oidcServer ${oidcServer}, cached token to be used ${tokenId}`);
-   const cachedToken = oidcTokenCache.get(tokenId);
-   if (cachedToken) {
-     if (cachedToken.error) {
-       return formatTokenCachedError(cachedToken.message || "Unknown error", cachedToken.cachedAt);
-     }
-     if (cachedToken.reuseLimit > new Date()) {
-       // refreshToken + this.cacheToken(token, identification);
-     }
-     console.debug(`Using cached OIDC token for id ${tokenId}`, cachedToken);
-     return cachedToken.token;
-   }
+  if (disabled) {
+    console.debug(`Login is disabled for cacheTag ${cacheTag} and oidcServer ${oidcServer}, removing any cached token ${tokenId} and returning empty string.`);
+    oidcTokenCache.del(tokenId);
+    return formatTokenDisabled();
+  }
+  console.debug(`Login is active for cacheTag ${cacheTag} and oidcServer ${oidcServer}, cached token to be used ${tokenId}`);
+  const cachedToken = oidcTokenCache.get(tokenId);
+  if (cachedToken) {
+    if (cachedToken.error) {
+      return formatTokenCachedError(cachedToken.message || "Unknown error", cachedToken.cachedAt);
+    }
+    if (cachedToken.reuseLimit > new Date()) {
+      // refreshToken + this.cacheToken(token, identification);
+    }
+    console.debug(`Using cached OIDC token for id ${tokenId}`, cachedToken);
+    return cachedToken.token;
+  }
 
-   if (alreadyRunningForTokenMap[tokenId]) {
-     console.debug(`The interactive login for token ${tokenId} is already running, skipping the processing`);
-     return formatTokenInProgress();
-   }
+  if (alreadyRunningForTokenMap[tokenId]) {
+    console.debug(`The interactive login for token ${tokenId} is already running, skipping the processing`);
+    return formatTokenInProgress();
+  }
 
-   alreadyRunningForTokenMap[tokenId] = true;
-   try {
-     const agent = getHttpsAgent(validate);
+  alreadyRunningForTokenMap[tokenId] = true;
+  try {
+    const agent = getHttpsAgent(validate);
 
-     const token = await OidcToken.interactiveLogin(oidcServer, infoPage, clientId, clientSecret, agent);
-     console.debug(`Obtained OIDC token for tokenId ${tokenId}`, token);
-     cacheToken(token, tokenId);
-     return token;
-   } catch (e) {
-      console.error("Interactive OIDC login failed:", safeErrorToString(e));
-      // Return something visible in Insomnia instead of empty string.
-      cacheErrorResult(tokenId, e);
-      return formatTokenError(e);
-   } finally {
-     alreadyRunningForTokenMap[tokenId] = false;
-   }
+    const token = await OidcToken.interactiveLogin(oidcServer, infoPage, clientId, clientSecret, agent);
+    console.debug(`Obtained OIDC token for tokenId ${tokenId}`, token);
+    cacheToken(token, tokenId);
+    return token;
+  } catch (e) {
+    console.error("Interactive OIDC login failed:", safeErrorToString(e));
+    // Return something visible in Insomnia instead of empty string.
+    cacheErrorResult(tokenId, e);
+    return formatTokenError(e);
+  } finally {
+    alreadyRunningForTokenMap[tokenId] = false;
+  }
 }
 
 async function interactiveLoginWithPrompt(
@@ -206,13 +206,27 @@ module.exports.templateTags = [
     description: "Get identity token from oidc.plus4u.net",
     args: [
       {
+        displayName: "Mode",
+        type: "enum",
+        defaultValue: "production",
+        options: [
+          { displayName: "Production", value: "production" },
+          { displayName: "Development", value: "development" }
+        ],
+        help: "Select the environment."
+      },
+      {
         displayName: "Disabled (also check/uncheck to refresh a cached result)",
         type: "boolean",
         defaultValue: false,
         help: `If checked, this configuration is disabled. You can also check/uncheck this to refresh a cached result`
       },
     ],
-    async run(context, disabled) {
+    async run(context, mode, disabled) {
+      if (mode === "development") {
+        const config = OidcToken.ENVIRONMENTS.development;
+        return await interactiveLogin(disabled, "development", config.oidcServer, config.infoPage, config.clientId, config.clientSecret, true);
+      }
       return await interactiveLogin(disabled);
     }
   },
@@ -366,7 +380,7 @@ module.exports.templateTags = [
         if (secureStore.exists()) {
           if (!this.vaultPassword) {
             let password;
-            password = await context.app.prompt('OIDC vault password', {label: "OIDC vault password", inputType: "password"});
+            password = await context.app.prompt('OIDC vault password', { label: "OIDC vault password", inputType: "password" });
             if (password) {
               try {
                 secureStore.read(password);
@@ -386,13 +400,13 @@ module.exports.templateTags = [
           }
         }
         if (!ac1) {
-          ac1 = await context.app.prompt('Access code 1', {label: "Access Code 1 for user " + identification, inputType: "password"});
-          ac2 = await context.app.prompt('Access code 2', {label: "Access Code 2 for user " + identification, inputType: "password"});
+          ac1 = await context.app.prompt('Access code 1', { label: "Access Code 1 for user " + identification, inputType: "password" });
+          ac2 = await context.app.prompt('Access code 2', { label: "Access Code 2 for user " + identification, inputType: "password" });
         }
       }
 
       let token = await this.login(ac1, ac2, oidcServer, oidcScope, validate);
-      this.accessCodesStore.set(cacheKey, {accessCode1: ac1, accessCode2: ac2});
+      this.accessCodesStore.set(cacheKey, { accessCode1: ac1, accessCode2: ac2 });
 
       return token;
     },

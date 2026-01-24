@@ -6,8 +6,6 @@ const open = require("open");
 const fetch = require("node-fetch");
 
 const OAUTH_CODE = "code";
-const DEFAULT_OIDC_TENANT = "bb977a99f4cc4c37a2afce3fd599d0a7";
-const DEFAULT_OIDC_BASE_URI = "https://uuidentity.plus4u.net/uu-oidc-maing02";
 const OIDC_WELL_KNOWN_DISCOVERY_PATH = ".well-known/openid-configuration";
 const OAUTH_GRANT_TYPE = "grant_type";
 const OAUTH_GRANT_TYPE_CODE = "authorization_code";
@@ -17,16 +15,30 @@ const OAUTH_CLIENT_ID = "client_id";
 const OAUTH_CLIENT_SECRET = "client_secret";
 const OAUTH_REDIRECT_URI = "redirect_uri";
 const OAUTH_RESPONSE_TYPE = "response_type";
-const DEFAULT_CLIENT_ID = "F64b643R05xQ62696875W1j2";
-const DEFAULT_CLIENT_SECRET = "2u1q5KU2Z0Bs5SErmYVwM053+zyKDxT7QLU2Q7Rr7nn5t5%Bt80px8mf3$s16FdK";
 const DEFAULT_AUDIENCE = "https:// http://localhost";
-const DEFAULT_INFO_PAGE = "https://uuidentity.plus4u.net/uu-identitymanagement-maing01/a9b105aff2744771be4daa8361954677/showAuthorizationCode";
+
+const ENVIRONMENTS = {
+  production: {
+    oidcServer: "https://uuidentity.plus4u.net/uu-oidc-maing02/bb977a99f4cc4c37a2afce3fd599d0a7/oidc",
+    clientId: "F64b643R05xQ62696875W1j2",
+    clientSecret: "2u1q5KU2Z0Bs5SErmYVwM053+zyKDxT7QLU2Q7Rr7nn5t5%Bt80px8mf3$s16FdK",
+    infoPage: "https://uuidentity.plus4u.net/uu-identitymanagement-maing01/a9b105aff2744771be4daa8361954677/showAuthorizationCode"
+  },
+  development: {
+    oidcServer: "https://uuidentity-dev.plus4u.net/uu-oidc-maing02/eca71064ecce44b0a25ce940eb8f053d/oidc",
+    clientId: "urn:uu:unregistered",
+    clientSecret: "unregistered",
+    infoPage: "https://uuidentity-dev.plus4u.net/uu-identitymanagement-maing01/58ceb15c275c4b31bfe0fc9768aa6a9c/showAuthorizationCode"
+  }
+};
+
+const DEFAULT_ENV = ENVIRONMENTS.production;
 
 class OidcClient {
 
   static async interactiveLogin(oidcServer, infoPage, clientId, clientSecret, agent) {
-    console.debug(`interactiveLogin called with params:`, {oidcServer, infoPage, clientId});
-    const usedOidcServer = oidcServer || OidcClient.getOidcUri();
+    console.debug(`interactiveLogin called with params:`, { oidcServer, infoPage, clientId });
+    const usedOidcServer = oidcServer || DEFAULT_ENV.oidcServer;
     let [code, serverPort] = await OidcClient.getAuthorizationCode(usedOidcServer, infoPage, clientId, agent);
     let token = await OidcClient.grantAuthorizationCodeToken(code, serverPort, clientId, clientSecret, agent, usedOidcServer);
 
@@ -44,10 +56,10 @@ class OidcClient {
   }
 
   static async getAuthorizationCode(oidcServer, infoPage, clientId, agent) {
-    console.debug(`getAuthorizationCode called with params:`, {oidcServer, infoPage, clientId});
+    console.debug(`getAuthorizationCode called with params:`, { oidcServer, infoPage, clientId });
     let metadata = await OidcClient.getMetadata(oidcServer, false, agent);
-    const usedClientId = clientId || DEFAULT_CLIENT_ID;
-    const usedInfoPage = infoPage || DEFAULT_INFO_PAGE;
+    const usedClientId = clientId || DEFAULT_ENV.clientId;
+    const usedInfoPage = infoPage || DEFAULT_ENV.infoPage;
     return await new Promise((resolve, reject) => {
       // Start local server to handle auth callback
       let server = http.createServer((req, res) => {
@@ -60,13 +72,13 @@ class OidcClient {
         if (code) {
           console.debug(`Received authorization code from OIDC server, redirecting to ${redirectUri}.`);
           resolve([code, server.address().port]);
-          res.writeHead(302, {"Location": redirectUri});
+          res.writeHead(302, { "Location": redirectUri });
         } else {
           let uuAppErrorMap = query["uuAppErrorMap"];
           console.error(`No access token code returned from OIDC server:`, uuAppErrorMap);
           reject(new Error(`No access token code returned from OIDC server: ${uuAppErrorMap}`));
           redirectUri += `&uuAppErrorMap=${uuAppErrorMap}`;
-          res.writeHead(302, {"Location": redirectUri});
+          res.writeHead(302, { "Location": redirectUri });
         }
         res.end(() => {
           // Close server after response is handled
@@ -87,15 +99,15 @@ class OidcClient {
   }
 
   static async getMetadata(providerUri = null, refresh = false, agent) {
-    console.debug("getMetadata called with params:", {providerUri});
+    console.debug("getMetadata called with params:", { providerUri });
     if (providerUri === null) {
       // TODO Handle trailing slashes from configuration parameters
-      providerUri = this.getOidcUri();
+      providerUri = DEFAULT_ENV.oidcServer;
     }
 
     let discoveryUri = `${providerUri}/${OIDC_WELL_KNOWN_DISCOVERY_PATH}`;
     console.debug("discoveryUri for getMetadata", discoveryUri);
-    const response = await fetch(discoveryUri, {agent: agent});
+    const response = await fetch(discoveryUri, { agent: agent });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(`OIDC discovery failed (${response.status} ${response.statusText}) at ${discoveryUri}${body ? `: ${body}` : ""}`);
@@ -106,9 +118,9 @@ class OidcClient {
   }
 
   static async grantAuthorizationCodeToken(authorizationCode, serverPort, clientId, clientSecret, agent, oidcServer) {
-    console.debug(`grantAuthorizationCodeToken called with params:`, {authorizationCode, serverPort, clientId, oidcServer});
-    const usedClientId = clientId || DEFAULT_CLIENT_ID;
-    const usedClientSecret = clientSecret || DEFAULT_CLIENT_SECRET;
+    console.debug(`grantAuthorizationCodeToken called with params:`, { authorizationCode, serverPort, clientId, oidcServer });
+    const usedClientId = clientId || DEFAULT_ENV.clientId;
+    const usedClientSecret = clientSecret || DEFAULT_ENV.clientSecret;
 
     let params = {};
     params[OAUTH_GRANT_TYPE] = OAUTH_GRANT_TYPE_CODE;
@@ -158,9 +170,9 @@ class OidcClient {
   }
 
   static getOidcUri() {
-    let oidcUri = `${DEFAULT_OIDC_BASE_URI}/${DEFAULT_OIDC_TENANT}/oidc`;
-    return oidcUri;
+    return DEFAULT_ENV.oidcServer;
   }
 }
 
 module.exports = OidcClient;
+module.exports.ENVIRONMENTS = ENVIRONMENTS;
