@@ -3,8 +3,8 @@ const NodeCache = require("node-cache");
 const Jwt = require("jws");
 const secureStore = require("oidc-plus4u-vault/lib/securestore");
 const fetch = require("node-fetch");
-const https = require('https');
-const crypto = require('crypto');
+const https = require('node:https');
+const crypto = require('node:crypto');
 
 const alreadyRunningForTokenMap = {};
 

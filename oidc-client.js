@@ -1,6 +1,6 @@
 "use strict";
 
-const http = require("http");
+const http = require("node:http");
 const Url = require('url-parse');
 const open = require("open");
 const fetch = require("node-fetch");
