@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+- Added support for Azure OIDC in `uuEePlus4uOidcToken` template tag.
+- Refactored `login` method in `plugin.js` to simplify architecture by splitting logic into specialized `_loginToAzure` and `_loginToUuOidc` handlers.
+- Extracted shared HTTP token request logic into a private `_performTokenRequest` method.
+- Standardized standard uuOIDC token requests to use `application/x-www-form-urlencoded` for improved OIDC compatibility.
+
+
 ## [0.5.0]
 - Added support for switching between Production and Development environments in `uuPersonPlus4uOidcToken`.
 
