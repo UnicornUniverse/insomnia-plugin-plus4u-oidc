@@ -1,6 +1,6 @@
 {
   "name": "insomnia-plugin-plus4u-oidc",
-  "version": "0.3.0",
+  "version": "0.3.0-customoidc.1",
   "description": "Insomnia plugin that provides easy authentication against oidc.plus4u.net .",
   "main": "plugin.js",
   "license": "MIT",
@@ -25,5 +25,8 @@
     "insomnia",
     "plus4u",
     "oidc"
-  ]
+  ],
+  "scripts": {
+    "uu-safe-install": "npx uu-safe-install"
+  }
 }

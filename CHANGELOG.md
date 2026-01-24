@@ -4,8 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-### Changed
+## [Unreleased 0.3.0-customoidc.1]
+- Added uuPersonCustomOidcToken which allows custom OIDC provider configuration.
+- Small improvements
+  - Improved user-facing error/status messages from template tags (now returns formatted `-- token ... --` strings instead of empty output).
+  - Made interactive login flow more robust (better error handling for OIDC discovery / token exchange).
+  - Adjusted token caching behavior to avoid caching near-expiry tokens.
+  - Improved behavior when token retrieval is already in progress (returns a clear status string).
+  - Updated cache key generation to avoid embedding the raw client secret (uses a short hash instead).
+  - Changed token endpoint requests to use `application/x-www-form-urlencoded` where applicable for better OIDC compatibility.
 
 ## [0.3.0] - 2025-01-07
 - possibility to disable certficate chain validity
