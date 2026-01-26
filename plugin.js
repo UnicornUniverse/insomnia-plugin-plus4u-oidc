@@ -327,20 +327,20 @@ module.exports.templateTags = [
       }
 
       const agent = getHttpsAgent(validate);
-
       let tokenEndpoint = await this.getTokenEndpoint(oidcServer, agent);
 
-      let credentials = {
-        accessCode1,
-        accessCode2,
-        grant_type: "password",
-        scope
-      };
+      if (tokenEndpoint.startsWith("https://login.microsoftonline.com/")) {
+        return this._loginToAzure(accessCode1, accessCode2, scope, tokenEndpoint, agent, oidcServer);
+      } else {
+        return this._loginToUuOidc(accessCode1, accessCode2, scope, tokenEndpoint, agent, oidcServer);
+      }
+    },
 
-      let headers = {};
-      // Token endpoints are often strict about x-www-form-urlencoded.
-      headers["Content-Type"] = "application/x-www-form-urlencoded";
-      headers["Accept"] = "application/json";
+    async _performTokenRequest(tokenEndpoint, credentials, agent) {
+      let headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
+      };
 
       const body = new URLSearchParams();
       Object.entries(credentials).forEach(([k, v]) => body.append(k, String(v)));
@@ -351,7 +351,34 @@ module.exports.templateTags = [
         body: body.toString(),
         agent: agent
       });
-      let resp = await res.json();
+      return await res.json();
+    },
+
+    async _loginToAzure(accessCode1, accessCode2, scope, tokenEndpoint, agent, oidcServer) {
+      let credentials = {
+        username: accessCode1,
+        password: accessCode2,
+        grant_type: "password",
+        scope,
+        client_id: scope.replace(/^api:\/\//, "").replace(/\/.*/, "")
+      };
+
+      let resp = await this._performTokenRequest(tokenEndpoint, credentials, agent);
+      if (resp.error) {
+        throw `Cannot login to OIDC server on ${oidcServer}. Probably invalid combination of Access Code 1 and Access Code 2. Error: ${resp.error_description || resp.error}`;
+      }
+      return resp.id_token;
+    },
+
+    async _loginToUuOidc(accessCode1, accessCode2, scope, tokenEndpoint, agent, oidcServer) {
+      let credentials = {
+        accessCode1,
+        accessCode2,
+        grant_type: "password",
+        scope
+      };
+
+      let resp = await this._performTokenRequest(tokenEndpoint, credentials, agent);
       if (resp && resp.uuAppErrorMap && Object.keys(resp.uuAppErrorMap).length > 0) {
         throw `Cannot login to OIDC server on ${oidcServer}. Probably invalid combination of Access Code 1 and Access Code 2.`;
       }
@@ -364,7 +391,11 @@ module.exports.templateTags = [
         agent: agent
       });
       const oidcConfig = await response.json();
-      if (oidcConfig && oidcConfig.uuAppErrorMap && Object.keys(oidcConfig.uuAppErrorMap).length > 0) {
+
+      const isAzure = oidcServer.startsWith("https://login.microsoftonline.com/");
+      const hasError = isAzure ? oidcConfig.error : (oidcConfig.uuAppErrorMap && Object.keys(oidcConfig.uuAppErrorMap).length > 0);
+
+      if (hasError) {
         throw `Cannot get configuration of OIDC server on ${oidcServer}. Probably invalid URL.`;
       }
       return oidcConfig.token_endpoint;
